@@ -1,9 +1,16 @@
+# vk_pc_bot.py
+# Чат-бот ВКонтакте для подбора ПК с проверкой совместимости
+# Требует: pip install vk_api
+
 import vk_api
 from vk_api.longpoll import VkLongPoll, VkEventType
+import time
 
 VK_TOKEN = 'vk1.a.1K53AvmQnhdbq84brU59w4jstLcVPo2ZwTtuRXXplC89NoKGNfUZ-l4AisMb9WE4SE-11JweLjFXzhYlGWtuGSOvWAEjcCCDucwD_nhpSbS8bwoQWfjRYf3usDobWPVIwOEmbQFmdVqq42d_YjhCeZRSrRhJLm8BJ_VSzeH6lxsBIwPmFgZFSCcNVbPVPF78TK5zlYqdC9g3R9hAPUqoxQ'
 
-# Справочник совместимости
+# -----------------------------
+# Конфигурации ПК
+# -----------------------------
 SOCKET_RAM = {
     "LGA1200": "DDR4",
     "AM4": "DDR4",
@@ -40,36 +47,40 @@ CONFIGS = [
     }
 ]
 
+# -----------------------------
 # Проверка совместимости
+# -----------------------------
 def check_compatibility(config):
     warnings = []
 
-    # 1. RAM ↔ сокет
+    # RAM ↔ сокет
     correct_ram = SOCKET_RAM.get(config['CPU']['socket'], None)
     if config['RAM']['type'] != correct_ram:
         warnings.append(f"⚠️ {config['RAM']['type']} несовместима с сокетом {config['CPU']['socket']} (требуется {correct_ram})")
 
-    # 2. Двухканальная RAM
+    # Двухканальная RAM
     if config['RAM']['channels'] < 2:
         warnings.append("⚠️ Рекомендуется использовать 2 модуля RAM для двухканального режима.")
 
-    # 3. GPU ↔ корпус (условно проверяем размер)
+    # GPU ↔ корпус
     if config['GPU']['size_mm'] > 320:
         warnings.append(f"⚠️ GPU {config['GPU']['model']} может не поместиться в стандартный корпус.")
 
-    # 4. Мощность блока питания с запасом 30%
+    # Мощность блока питания с запасом 30%
     total_power = config['CPU']['TDP'] + (300 if "RTX" in config['GPU']['model'] else 0) + 50
     recommended_psu = int(total_power * 1.3)
     if config['PSU']['power'] < recommended_psu:
         warnings.append(f"⚠️ Рекомендуемая мощность БП с запасом: {recommended_psu} Вт. Текущий: {config['PSU']['power']} Вт")
 
-    # 5. Минимальные требования для работы
+    # Минимальные требования
     if config['RAM']['size'] < 16:
         warnings.append("⚠️ Минимум 16 ГБ RAM для комфортной работы.")
 
     return warnings
 
+# -----------------------------
 # Подбор конфигурации
+# -----------------------------
 def recommend_config(task):
     task = task.lower()
     for config in CONFIGS:
@@ -89,19 +100,29 @@ def recommend_config(task):
             return message
     return "❌ Не удалось подобрать конфигурацию. Уточните задачу."
 
+# -----------------------------
 # Запуск VK LongPoll
-vk_session = vk_api.VkApi(token=VK_TOKEN)
-longpoll = VkLongPoll(vk_session)
-vk = vk_session.get_api()
+# -----------------------------
+def main():
+    vk_session = vk_api.VkApi(token=VK_TOKEN)
+    longpoll = VkLongPoll(vk_session)
+    vk = vk_session.get_api()
+    print("Бот запущен...")
 
-print("Бот запущен...")
+    while True:
+        try:
+            for event in longpoll.listen():
+                if event.type == VkEventType.MESSAGE_NEW and event.to_me:
+                    user_text = event.text
+                    response = recommend_config(user_text)
+                    vk.messages.send(
+                        user_id=event.user_id,
+                        message=response,
+                        random_id=int(time.time()*1000)
+                    )
+        except Exception as e:
+            print(f"Ошибка: {e}, перезапуск через 5 сек...")
+            time.sleep(5)
 
-for event in longpoll.listen():
-    if event.type == VkEventType.MESSAGE_NEW and event.to_me:
-        user_text = event.text
-        response = recommend_config(user_text)
-        vk.messages.send(
-            user_id=event.user_id,
-            message=response,
-            random_id=0
-        )
+if __name__ == "__main__":
+    main()
