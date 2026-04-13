@@ -1,0 +1,107 @@
+import vk_api
+from vk_api.longpoll import VkLongPoll, VkEventType
+
+VK_TOKEN = 'vk1.a.1K53AvmQnhdbq84brU59w4jstLcVPo2ZwTtuRXXplC89NoKGNfUZ-l4AisMb9WE4SE-11JweLjFXzhYlGWtuGSOvWAEjcCCDucwD_nhpSbS8bwoQWfjRYf3usDobWPVIwOEmbQFmdVqq42d_YjhCeZRSrRhJLm8BJ_VSzeH6lxsBIwPmFgZFSCcNVbPVPF78TK5zlYqdC9g3R9hAPUqoxQ'
+
+# Справочник совместимости
+SOCKET_RAM = {
+    "LGA1200": "DDR4",
+    "AM4": "DDR4",
+    "AM5": "DDR5"
+}
+
+CONFIGS = [
+    {
+        "name": "Учёба/Офис",
+        "tasks": ["учёба", "офис", "браузер", "документы"],
+        "CPU": {"model": "Intel i5 10th Gen", "socket": "LGA1200", "TDP": 65},
+        "GPU": {"model": "встроенная", "size_mm": 0},
+        "RAM": {"size": 16, "type": "DDR4", "channels": 2},
+        "SSD": {"size": 500},
+        "PSU": {"power": 450, "cert": "80 PLUS"}
+    },
+    {
+        "name": "Игры",
+        "tasks": ["игры", "геймерский ПК"],
+        "CPU": {"model": "AMD Ryzen 7 5800X", "socket": "AM4", "TDP": 105},
+        "GPU": {"model": "NVIDIA RTX 3070", "size_mm": 300},
+        "RAM": {"size": 32, "type": "DDR4", "channels": 2},
+        "SSD": {"size": 1000},
+        "PSU": {"power": 700, "cert": "80 PLUS Gold"}
+    },
+    {
+        "name": "Монтаж/Графика",
+        "tasks": ["видео", "графика", "монтаж"],
+        "CPU": {"model": "AMD Ryzen 9 7950X", "socket": "AM5", "TDP": 170},
+        "GPU": {"model": "NVIDIA RTX 4090", "size_mm": 336},
+        "RAM": {"size": 64, "type": "DDR5", "channels": 2},
+        "SSD": {"size": 2000},
+        "PSU": {"power": 850, "cert": "80 PLUS Gold"}
+    }
+]
+
+# Проверка совместимости
+def check_compatibility(config):
+    warnings = []
+
+    # 1. RAM ↔ сокет
+    correct_ram = SOCKET_RAM.get(config['CPU']['socket'], None)
+    if config['RAM']['type'] != correct_ram:
+        warnings.append(f"⚠️ {config['RAM']['type']} несовместима с сокетом {config['CPU']['socket']} (требуется {correct_ram})")
+
+    # 2. Двухканальная RAM
+    if config['RAM']['channels'] < 2:
+        warnings.append("⚠️ Рекомендуется использовать 2 модуля RAM для двухканального режима.")
+
+    # 3. GPU ↔ корпус (условно проверяем размер)
+    if config['GPU']['size_mm'] > 320:
+        warnings.append(f"⚠️ GPU {config['GPU']['model']} может не поместиться в стандартный корпус.")
+
+    # 4. Мощность блока питания с запасом 30%
+    total_power = config['CPU']['TDP'] + (300 if "RTX" in config['GPU']['model'] else 0) + 50
+    recommended_psu = int(total_power * 1.3)
+    if config['PSU']['power'] < recommended_psu:
+        warnings.append(f"⚠️ Рекомендуемая мощность БП с запасом: {recommended_psu} Вт. Текущий: {config['PSU']['power']} Вт")
+
+    # 5. Минимальные требования для работы
+    if config['RAM']['size'] < 16:
+        warnings.append("⚠️ Минимум 16 ГБ RAM для комфортной работы.")
+
+    return warnings
+
+# Подбор конфигурации
+def recommend_config(task):
+    task = task.lower()
+    for config in CONFIGS:
+        if any(t in task for t in config['tasks']):
+            message = f"Рекомендованная конфигурация: {config['name']}\n" \
+                      f"CPU: {config['CPU']['model']} (сокет: {config['CPU']['socket']})\n" \
+                      f"GPU: {config['GPU']['model']}\n" \
+                      f"ОЗУ: {config['RAM']['size']} ГБ {config['RAM']['type']} ({config['RAM']['channels']} канала)\n" \
+                      f"SSD: {config['SSD']['size']} ГБ\n" \
+                      f"БП: {config['PSU']['power']} Вт, {config['PSU']['cert']}"
+
+            warnings = check_compatibility(config)
+            if warnings:
+                message += "\n\nПроверка совместимости:\n" + "\n".join(warnings)
+            else:
+                message += "\n\n✅ Все компоненты совместимы."
+            return message
+    return "❌ Не удалось подобрать конфигурацию. Уточните задачу."
+
+# Запуск VK LongPoll
+vk_session = vk_api.VkApi(token=VK_TOKEN)
+longpoll = VkLongPoll(vk_session)
+vk = vk_session.get_api()
+
+print("Бот запущен...")
+
+for event in longpoll.listen():
+    if event.type == VkEventType.MESSAGE_NEW and event.to_me:
+        user_text = event.text
+        response = recommend_config(user_text)
+        vk.messages.send(
+            user_id=event.user_id,
+            message=response,
+            random_id=0
+        )
