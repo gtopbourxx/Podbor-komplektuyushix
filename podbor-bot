@@ -1,125 +1,113 @@
-from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, MessageHandler, ContextTypes, filters
 
-TELEGRAM_TOKEN = '8623117209:AAEeQew6KbivoYkcduhNb9Gg9XzzivLHeNU'  # Получается через BotFather
+TELEGRAM_TOKEN = '8623117209:AAEeQew6KbivoYkcduhNb9Gg9XzzivLHeNU'
 
-# -----------------------------
-# Конфигурации ПК
-# -----------------------------
-SOCKET_RAM = {
-    "LGA1200": "DDR4",
-    "AM4": "DDR4",
-    "AM5": "DDR5"
-}
+SOCKET_RAM = {"LGA1200": "DDR4", "AM4": "DDR4", "AM5": "DDR5"}
 
 CONFIGS = [
-    {
-        "name": "Учёба/Офис",
-        "tasks": ["учёба", "офис", "браузер", "документы"],
-        "CPU": {"model": "Intel i5 10th Gen", "socket": "LGA1200", "TDP": 65},
-        "GPU": {"model": "встроенная", "size_mm": 0},
-        "RAM": {"size": 16, "type": "DDR4", "channels": 2},
-        "SSD": {"size": 500},
-        "PSU": {"power": 450, "cert": "80 PLUS"}
-    },
-    {
-        "name": "Игры",
-        "tasks": ["игры", "геймерский ПК"],
-        "CPU": {"model": "AMD Ryzen 7 5800X", "socket": "AM4", "TDP": 105},
-        "GPU": {"model": "NVIDIA RTX 3070", "size_mm": 300},
-        "RAM": {"size": 32, "type": "DDR4", "channels": 2},
-        "SSD": {"size": 1000},
-        "PSU": {"power": 700, "cert": "80 PLUS Gold"}
-    },
-    {
-        "name": "Монтаж/Графика",
-        "tasks": ["видео", "графика", "монтаж"],
-        "CPU": {"model": "AMD Ryzen 9 7950X", "socket": "AM5", "TDP": 170},
-        "GPU": {"model": "NVIDIA RTX 4090", "size_mm": 336},
-        "RAM": {"size": 64, "type": "DDR5", "channels": 2},
-        "SSD": {"size": 2000},
-        "PSU": {"power": 850, "cert": "80 PLUS Gold"}
-    }
+    {"name":"Учёба/Офис Базовая","tasks":["учёба","офис"],"CPU":{"model":"Intel i3 10th Gen","socket":"LGA1200","TDP":55},
+     "GPU":{"model":"встроенная","size_mm":0},"RAM":{"size":8,"type":"DDR4","channels":2},"HDD":{"size":500},"PSU":{"power":400,"cert":"80 PLUS"}},
+    {"name":"Учёба/Офис Оптимальная","tasks":["учёба","офис"],"CPU":{"model":"Intel i5 10th Gen","socket":"LGA1200","TDP":65},
+     "GPU":{"model":"встроенная","size_mm":0},"RAM":{"size":16,"type":"DDR4","channels":2},"HDD":{"size":1000},"PSU":{"power":450,"cert":"80 PLUS"}},
+    {"name":"Игры Бюджетная","tasks":["игры"],"CPU":{"model":"AMD Ryzen 5 5600X","socket":"AM4","TDP":65},
+     "GPU":{"model":"NVIDIA RTX 3060","size_mm":250},"RAM":{"size":16,"type":"DDR4","channels":2},"SSD":{"size":500},"PSU":{"power":550,"cert":"80 PLUS Bronze"}},
+    {"name":"Игры Оптимальная","tasks":["игры"],"CPU":{"model":"AMD Ryzen 7 5800X","socket":"AM4","TDP":105},
+     "GPU":{"model":"NVIDIA RTX 3070","size_mm":300},"RAM":{"size":32,"type":"DDR4","channels":2},"SSD":{"size":1000},"PSU":{"power":700,"cert":"80 PLUS Gold"}},
+    {"name":"Монтаж/Графика Базовая","tasks":["монтаж","графика"],"CPU":{"model":"AMD Ryzen 7 7700X","socket":"AM5","TDP":105},
+     "GPU":{"model":"NVIDIA RTX 4070","size_mm":300},"RAM":{"size":32,"type":"DDR5","channels":2},"SSD":{"size":1000},"PSU":{"power":750,"cert":"80 PLUS Gold"}},
+    {"name":"Монтаж/Графика Премиум","tasks":["монтаж","графика"],"CPU":{"model":"AMD Ryzen 9 7950X","socket":"AM5","TDP":170},
+     "GPU":{"model":"NVIDIA RTX 4090","size_mm":336},"RAM":{"size":64,"type":"DDR5","channels":2},"SSD":{"size":2000},"PSU":{"power":850,"cert":"80 PLUS Gold"}}
 ]
 
-# -----------------------------
-# Проверка совместимости
-# -----------------------------
-def check_compatibility(config):
-    warnings = []
-
-    # RAM ↔ сокет
-    correct_ram = SOCKET_RAM.get(config['CPU']['socket'], None)
-    if config['RAM']['type'] != correct_ram:
-        warnings.append(f"⚠️ {config['RAM']['type']} несовместима с сокетом {config['CPU']['socket']} (требуется {correct_ram})")
-
-    # Двухканальная RAM
-    if config['RAM']['channels'] < 2:
+def check_compatibility(cfg):
+    warnings=[]
+    correct_ram = SOCKET_RAM.get(cfg['CPU']['socket'])
+    if cfg['RAM']['type'] != correct_ram:
+        warnings.append(f"⚠️ {cfg['RAM']['type']} несовместима с сокетом {cfg['CPU']['socket']} (требуется {correct_ram})")
+    if cfg['RAM']['channels'] < 2:
         warnings.append("⚠️ Рекомендуется использовать 2 модуля RAM для двухканального режима.")
-
-    # GPU ↔ корпус
-    if config['GPU']['size_mm'] > 320:
-        warnings.append(f"⚠️ GPU {config['GPU']['model']} может не поместиться в стандартный корпус.")
-
-    # Мощность блока питания с запасом 30%
-    total_power = config['CPU']['TDP'] + (300 if "RTX" in config['GPU']['model'] else 0) + 50
-    recommended_psu = int(total_power * 1.3)
-    if config['PSU']['power'] < recommended_psu:
-        warnings.append(f"⚠️ Рекомендуемая мощность БП с запасом: {recommended_psu} Вт. Текущий: {config['PSU']['power']} Вт")
-
-    # Минимальные требования
-    if config['RAM']['size'] < 16:
-        warnings.append("⚠️ Минимум 16 ГБ RAM для комфортной работы.")
-
+    if cfg.get('GPU') and cfg['GPU']['size_mm']>320:
+        warnings.append(f"⚠️ GPU {cfg['GPU']['model']} может не поместиться в корпус.")
+    total_power = cfg['CPU']['TDP'] + (300 if cfg.get('GPU') and cfg['GPU']['model'].startswith("NVIDIA RTX") else 0) + 50
+    recommended_psu = int(total_power*1.3)
+    if cfg['PSU']['power']<recommended_psu:
+        warnings.append(f"⚠️ Рекомендуемая мощность БП с запасом: {recommended_psu} Вт. Текущая: {cfg['PSU']['power']} Вт")
+    if cfg['RAM']['size']<16:
+        warnings.append("⚠️ Минимум 16 ГБ RAM рекомендуется.")
     return warnings
 
-# -----------------------------
-# Подбор конфигурации
-# -----------------------------
-def recommend_config(task):
-    task = task.lower()
-    for config in CONFIGS:
-        if any(t in task for t in config['tasks']):
-            message = f"Рекомендованная конфигурация: {config['name']}\n" \
-                      f"CPU: {config['CPU']['model']} (сокет: {config['CPU']['socket']})\n" \
-                      f"GPU: {config['GPU']['model']}\n" \
-                      f"ОЗУ: {config['RAM']['size']} ГБ {config['RAM']['type']} ({config['RAM']['channels']} канала)\n" \
-                      f"SSD: {config['SSD']['size']} ГБ\n" \
-                      f"БП: {config['PSU']['power']} Вт, {config['PSU']['cert']}"
+def recommend_configs(task_name, preferences=None):
+    task_lower = task_name.lower()
+    matched = [cfg for cfg in CONFIGS if any(k.lower() in task_lower for k in cfg['tasks'])]
+    if not matched:
+        return "❌ Не удалось подобрать конфигурацию."
+    if preferences:
+    pref_lower = preferences.lower()
+    filtered = []
+    for cfg in matched:
+        if pref_lower in cfg['CPU']['model'].lower() or (cfg.get('GPU') and pref_lower in cfg['GPU']['model'].lower()):
+            filtered.append(cfg)
+    matched = filtered  # всегда заменяем
+    if not matched:
+        return f"❌ Нет конфигураций, соответствующих предпочтению '{preferences}'"
+    messages=[]
+    for cfg in matched:
+        msg=f"Конфигурация: {cfg['name']}\nCPU: {cfg['CPU']['model']} (сокет: {cfg['CPU']['socket']})"
+        if cfg.get('GPU'): msg += f"\nGPU: {cfg['GPU']['model']}"
+        msg += f"\nОЗУ: {cfg['RAM']['size']} ГБ {cfg['RAM']['type']} ({cfg['RAM']['channels']} канала)"
+        if cfg.get('HDD'): msg += f"\nHDD: {cfg['HDD']['size']} ГБ"
+        elif cfg.get('SSD'): msg += f"\nSSD: {cfg['SSD']['size']} ГБ"
+        msg += f"\nБП: {cfg['PSU']['power']} Вт, {cfg['PSU']['cert']}"
+        warnings = check_compatibility(cfg)
+        if warnings: msg += "\n\nПроверка совместимости:\n" + '\n'.join(warnings)
+        else: msg += "\n\n✅ Все компоненты совместимы."
+        messages.append(msg)
+    return '\n\n---\n\n'.join(messages)
 
-            warnings = check_compatibility(config)
-            if warnings:
-                message += "\n\nПроверка совместимости:\n" + "\n".join(warnings)
-            else:
-                message += "\n\n✅ Все компоненты совместимы."
-            return message
-    return "❌ Не удалось подобрать конфигурацию. Уточните задачу."
-
-# -----------------------------
-# Обработчики команд
-# -----------------------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "Привет! Я бот по подбору ПК.\nНапишите задачу: например, 'Мне нужен ПК для игр'"
-    )
+    keyboard = [[InlineKeyboardButton("Учёба/Офис", callback_data="Учёба/Офис")],
+                [InlineKeyboardButton("Игры", callback_data="Игры")],
+                [InlineKeyboardButton("Монтаж/Графика", callback_data="Монтаж/Графика")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    instructions = ("Привет! Подберите ПК:\n"
+                "1) По кнопкам: Учёба/Офис, Игры, Монтаж/Графика\n"
+                "2) Или по тексту: напишите задачу и предпочтения. Примеры:\n"
+                "   - 'Игры, AMD'\n"
+                "   - 'Монтаж, Intel'")
+    await update.message.reply_text(instructions, reply_markup=reply_markup)
 
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_text = update.message.text
-    response = recommend_config(user_text)
-    await update.message.reply_text(response)
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    response = recommend_configs(query.data)
+    keyboard = [[InlineKeyboardButton("Учёба/Офис", callback_data="Учёба/Офис")],
+                [InlineKeyboardButton("Игры", callback_data="Игры")],
+                [InlineKeyboardButton("Монтаж/Графика", callback_data="Монтаж/Графика")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await query.message.reply_text(response, reply_markup=reply_markup)
 
-# -----------------------------
-# Основной запуск
-# -----------------------------
+async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text
+    preferences = None
+    if "," in text:
+        parts = [p.strip() for p in text.split(",")]
+        if len(parts) > 1:
+            preferences = parts[-1]
+    response = recommend_configs(text, preferences)
+    keyboard = [[InlineKeyboardButton("Учёба/Офис", callback_data="Учёба/Офис")],
+                [InlineKeyboardButton("Игры", callback_data="Игры")],
+                [InlineKeyboardButton("Монтаж/Графика", callback_data="Монтаж/Графика")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text(response, reply_markup=reply_markup)
+
 def main():
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
-
-    # Команды и сообщения
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-
-    print("Бот Telegram запущен...")
+    app.add_handler(CallbackQueryHandler(button_handler))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
+    print("Бот запущен...")
     app.run_polling()
 
-if __name__ == "__main__":
+if __name__=="__main__":
     main()
